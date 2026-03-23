@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Do DM - Ranjan Pro</title>
+    <script src="https://cdn.pubnub.com/sdk/javascript/pubnub.7.2.2.min.js"></script>
+    <style>
+        :root { --bg: #0b141a; --header: #202c33; --accent: #00a884; --sent: #005c4b; --text: #e9edef; }
+        body { font-family: sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; margin: 0; overflow: hidden; }
+        .header { background: var(--header); padding: 12px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #374045; }
+        #chat-window { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; background-color: #0b141a; }
+        .msg { padding: 10px; border-radius: 8px; max-width: 80%; font-size: 15px; color: white; }
+        .my { background: var(--sent); align-self: flex-end; }
+        .other { background: var(--header); align-self: flex-start; }
+        .footer { background: var(--header); padding: 10px; display: flex; gap: 8px; }
+        input { flex: 1; padding: 12px; border-radius: 20px; border: none; background: #2a3942; color: white; outline: none; }
+        .btn { background: var(--accent); border: none; width: 45px; height: 45px; border-radius: 50%; color: white; cursor: pointer; font-weight: bold; }
+        .login-screen { position: fixed; inset: 0; background: #111b21; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
+        .card { background: #233138; padding: 25px; border-radius: 12px; width: 100%; max-width: 320px; text-align: center; border: 1px solid var(--accent); }
+    </style>
+</head>
+<body>
+
+<div id="login" class="login-screen">
+    <div class="card">
+        <h2 style="color:var(--accent); margin-bottom:15px;">Do DM Connect</h2>
+        <input type="text" id="my-id" placeholder="Apna Number Daalein">
+        <input type="text" id="target-id" placeholder="Dost ka Number Daalein">
+        <button onclick="startApp()" style="width:100%; padding:12px; background:var(--accent); border:none; color:white; border-radius:8px; font-weight:bold; margin-top:10px;">START CHAT</button>
+    </div>
+</div>
+
+<div class="header">
+    <div id="chat-title" style="font-weight:bold">Offline</div>
+    <button onclick="startVideoCall()" style="background:#007bff; border:none; color:white; padding:8px 15px; border-radius:5px; font-weight:bold;">📹 VIDEO CALL</button>
+</div>
+
+<div id="chat-window"></div>
+
+<div class="footer">
+    <input type="text" id="text-input" placeholder="Yahan likhein...">
+    <button class="btn" onclick="sendMsg()">➤</button>
+    <button class="btn" id="mic-btn" onmousedown="startRec()" onmouseup="stopRec()" ontouchstart="startRec()" ontouchend="stopRec()">🎤</button>
+</div>
+
+<script>
+    // --- 🔑 SAB KUCH SET HAI AB ---
+    const MY_PUBLISH_KEY = "pub-c-50634380-a33d-41e3-9484-a68cad6bcaa1"; 
+    const MY_SUBSCRIBE_KEY = "sub-c-7a832be4-a155-4e83-b922-8d2523117c3a"; 
+    // ------------------------------
+
+    let pubnub, myNum, friendNum, recorder, chunks = [];
+
+    function startApp() {
+        myNum = document.getElementById('my-id').value.trim();
+        friendNum = document.getElementById('target-id').value.trim();
+        
+        if(!myNum || !friendNum) return alert("Dono numbers daalo!");
+
+        pubnub = new PubNub({ publishKey: MY_PUBLISH_KEY, subscribeKey: MY_SUBSCRIBE_KEY, userId: myNum });
+        const channel = [myNum, friendNum].sort().join('_');
+
+        pubnub.addListener({ message: (m) => render(m.message) });
+        pubnub.subscribe({ channels: [channel] });
+
+        document.getElementById('login').style.display = 'none';
+        document.getElementById('chat-title').innerText = "Friend: " + friendNum;
+    }
+
+    function sendMsg() {
+        const text = document.getElementById('text-input').value;
+        if(!text) return;
+        pubnub.publish({ channel: [myNum, friendNum].sort().join('_'), message: { type: 'text', data: text, from: myNum } });
+        document.getElementById('text-input').value = "";
+    }
+
+    function startVideoCall() {
+        const room = "RanjanCall_" + [myNum, friendNum].sort().join('_');
+        const vUrl = "https://meet.jit.si/" + room;
+        // Dost ko link bhejein
+        pubnub.publish({ 
+            channel: [myNum, friendNum].sort().join('_'), 
+            message: { type: 'text', data: "🚨 Video Call Start! Join here: " + vUrl, from: myNum } 
+        });
+        window.open(vUrl, '_blank');
+    }
+
+    async function startRec() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            recorder = new MediaRecorder(stream);
+            chunks = [];
+            recorder.ondataavailable = e => chunks.push(e.data);
+            recorder.onstop = () => {
+                const blob = new Blob(chunks, { type: 'audio/wav' });
+                const reader = new FileReader();
+                reader.readAsDataURL(blob);
+                reader.onloadend = () => {
+                    pubnub.publish({ channel: [myNum, friendNum].sort().join('_'), message: { type: 'voice', data: reader.result, from: myNum } });
+                };
+            };
+            recorder.start();
+            document.getElementById('mic-btn').style.background = "red";
+        } catch(e) { alert("Mic Permission Allow karein!"); }
+    }
+
+    function stopRec() {
+        if(recorder && recorder.state !== "inactive") {
+            recorder.stop();
+            document.getElementById('mic-btn').style.background = "#00a884";
+        }
+    }
+
+    function render(msg) {
+        const win = document.getElementById('chat-window');
+        const isMe = msg.from === myNum;
+        const div = document.createElement('div');
+        div.className = `msg ${isMe ? 'my' : 'other'}`;
+        if(msg.type === 'text') div.innerText = msg.data;
+        else div.innerHTML = `<audio controls src="${msg.data}"></audio>`;
+        win.appendChild(div);
+        win.scrollTop = win.scrollHeight;
+    }
+</script>
+</body>
+</html>
